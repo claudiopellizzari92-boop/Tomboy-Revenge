@@ -9,10 +9,15 @@
     touch-action:none;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
   #wrap{position:fixed;inset:0;display:flex;align-items:center;justify-content:center}
   canvas{image-rendering:pixelated;image-rendering:crisp-edges;touch-action:none;display:block}
+  #fsBtn{position:fixed;top:8px;right:8px;z-index:50;background:rgba(20,16,28,0.8);
+    color:#ffd24a;border:1.5px solid #7a4048;border-radius:8px;padding:8px 12px;
+    font-family:'Courier New',monospace;font-size:13px;cursor:pointer;display:none}
+  #fsBtn:active{background:rgba(60,30,45,0.9)}
 </style>
 </head>
 <body>
 <div id="wrap"><canvas id="cv" width="960" height="540"></canvas></div>
+<button id="fsBtn">⛶ Pantalla completa</button>
 <script>
 'use strict';
 /* ============================================================
@@ -58,6 +63,55 @@ async function sbTraerTop(modo){
     return globalTop;
   }catch(e){ globalError = 'sin conexión al ranking'; globalCargando = false; return null; }
 }
+
+// ---- GUARDADO EN LA NUBE (compras/monedas/progreso por alias) ----
+async function sbGuardarPerfil(){
+  if(!SB_ON() || !SAVE.alias) return;
+  try{
+    const perfil = {
+      alias: SAVE.alias,
+      coins: coins,
+      upg: UPG,
+      hiscore: SAVE.hiscore,
+      horde_best: SAVE.hordeBest,
+      horde_unlocked: SAVE.hordeUnlocked,
+      actualizado: new Date().toISOString()
+    };
+    // upsert: inserta o actualiza según el alias (que es clave única)
+    await fetch(SB_URL + '/rest/v1/perfiles', {
+      method: 'POST',
+      headers: {
+        'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY,
+        'Content-Type': 'application/json',
+        'Prefer': 'resolution=merge-duplicates'
+      },
+      body: JSON.stringify(perfil)
+    });
+  }catch(e){ /* si falla, queda el guardado local */ }
+}
+
+async function sbCargarPerfil(alias){
+  if(!SB_ON() || !alias) return null;
+  try{
+    const q = SB_URL + '/rest/v1/perfiles?select=*&alias=eq.' + encodeURIComponent(alias) + '&limit=1';
+    const r = await fetch(q, { headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY } });
+    if(!r.ok) return null;
+    const arr = await r.json();
+    if(arr && arr.length){
+      const d = arr[0];
+      // aplicar el progreso de la nube (si es mejor o más avanzado)
+      coins = Math.max(coins, d.coins || 0);
+      if(d.upg) for(const k in UPG) if(typeof d.upg[k] === 'number') UPG[k] = Math.max(UPG[k], d.upg[k]);
+      SAVE.hiscore = Math.max(SAVE.hiscore, d.hiscore || 0);
+      SAVE.hordeBest = Math.max(SAVE.hordeBest, d.horde_best || 0);
+      SAVE.hordeUnlocked = SAVE.hordeUnlocked || !!d.horde_unlocked;
+      hiscore = SAVE.hiscore;
+      saveGame();
+      return d;
+    }
+  }catch(e){}
+  return null;
+}
 /* ============================================================
    TOMBOY REVENGE — la última pelea (v24)
    Animación esquelética: una sola pose recortada en 5 piezas
@@ -79,6 +133,27 @@ function fit(){
   cv.style.height = Math.floor(H * s) + 'px';
 }
 addEventListener('resize', fit); fit();
+
+// ---- PANTALLA COMPLETA (móvil) ----
+const fsBtn = document.getElementById('fsBtn');
+const enFS = () => document.fullscreenElement || document.webkitFullscreenElement;
+function pedirFullscreen(){
+  const el = document.documentElement;
+  const fn = el.requestFullscreen || el.webkitRequestFullscreen || el.mozRequestFullScreen || el.msRequestFullscreen;
+  if(fn){ try{ fn.call(el); }catch(e){} }
+  // bloquear orientación horizontal si se puede (mejor para un beat'em up)
+  setTimeout(() => { try{ screen.orientation && screen.orientation.lock && screen.orientation.lock('landscape'); }catch(e){} }, 300);
+}
+function actualizarFsBtn(){
+  // mostrar el botón solo en móvil y si no estamos ya en fullscreen
+  const esMovil = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+  fsBtn.style.display = (esMovil && !enFS()) ? 'block' : 'none';
+  setTimeout(fit, 100);
+}
+fsBtn.addEventListener('click', () => { pedirFullscreen(); setTimeout(actualizarFsBtn, 400); });
+document.addEventListener('fullscreenchange', actualizarFsBtn);
+document.addEventListener('webkitfullscreenchange', actualizarFsBtn);
+actualizarFsBtn();
 cv.addEventListener('contextmenu', e => e.preventDefault());
 
 /* ---------------- RIGS ---------------- */
@@ -409,6 +484,7 @@ function loadSave(){
       coins = d.coins || 0;
       SAVE.tabla = Array.isArray(d.tabla) ? d.tabla : [];
       if(d.upg) for(const k in UPG) if(typeof d.upg[k] === 'number') UPG[k] = d.upg[k];
+      SAVE.alias = d.alias || '';
     }
   }catch(e){ /* sin almacenamiento: se juega igual, sin guardar */ }
 }
@@ -416,11 +492,12 @@ function saveGame(){
   try{
     localStorage.setItem('tomboyRise', JSON.stringify({
       hiscore:SAVE.hiscore, hordeBest:SAVE.hordeBest, hordeUnlocked:SAVE.hordeUnlocked,
-      coins:coins, upg:UPG, tabla:SAVE.tabla
+      coins:coins, upg:UPG, tabla:SAVE.tabla, alias:SAVE.alias
     }));
   }catch(e){}
 }
 loadSave();
+if(SB_ON() && SAVE.alias){ sbCargarPerfil(SAVE.alias); }   // sincronizar progreso de la nube al abrir
 let hiscore = SAVE.hiscore;
 const keys = {};
 const pressed = { punch:false, kick:false, jump:false, special:false, throw:false, eat:false, dash:false };
@@ -781,6 +858,7 @@ function pedirAlias(){
   if(n && n.trim()){
     SAVE.alias = n.trim().slice(0, 16);
     saveGame();
+    if(SB_ON()) sbCargarPerfil(SAVE.alias);   // traer sus compras/monedas de la nube
   }
 }
 function pruebaFinal(){
@@ -990,7 +1068,7 @@ function confirmarCompra(i){
   if(lvl >= u.max){ SFX.comboBreak(); negado = 700; return; }
   const c = u.costo(lvl);
   if(coins < c){ SFX.comboBreak(); negado = 700; return; }
-  coins -= c; UPG[u.k]++; saveGame(); SFX.buy();
+  coins -= c; UPG[u.k]++; saveGame(); if(SB_ON()) sbGuardarPerfil(); SFX.buy();
   compraOk = 700;
   if(UPG[u.k] >= u.max) shopModal = -1;    // si llegó al máximo, cerramos
 }
@@ -1354,6 +1432,7 @@ function endRun(how){
   if(SB_ON()){
     const modoScore = gameMode === 'horde' ? 'horde' : 'story';
     sbEnviarScore(alias, score, modoScore, wave, comboBest);
+    sbGuardarPerfil();   // guardar monedas/compras/récords en la nube
   }
   saveGame();
 }
