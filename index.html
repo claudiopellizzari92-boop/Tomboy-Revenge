@@ -254,8 +254,22 @@ const COMIDA = [
   { id:'full',    nom:'PIZZA ENTERA',     cura:100 }
 ];
 function comidaActual(){ return COMIDA[Math.min(UPG.comida, COMIDA.length - 1)]; }
+/* Con la mejora de PIZZA a full, la comida sale AL AZAR entre los 4 tipos (variedad).
+   Los pesos deciden qué tan seguido sale cada una: [tequeño, porción, media, entera].
+   [1,1,1,1] = azar puro (promedio 64 de cura) · [1,2,3,4] = pesado hacia lo bueno (promedio 75). */
+const COMIDA_PESOS = [1, 1, 1, 1];
+function comidaAlAzar(){
+  const tot = COMIDA_PESOS.reduce((a,b) => a+b, 0);
+  let r = Math.random() * tot;
+  for(let i = 0; i < COMIDA.length; i++){
+    r -= COMIDA_PESOS[i];
+    if(r < 0) return i;
+  }
+  return COMIDA.length - 1;
+}
 function nuevaComida(x, y){
-  const t = Math.min(UPG.comida, 3);
+  // a full: variedad (los 4 tipos al azar). Sin la mejora al máximo: el mejor tipo desbloqueado.
+  const t = (UPG.comida >= COMIDA.length - 1) ? comidaAlAzar() : Math.min(UPG.comida, 3);
   return { x:x, y:y, t:0, kind:'food', tier:t, heal:COMIDA[t].cura };
 }
 
@@ -795,9 +809,9 @@ const ICE_G_COMBO  = 12;    // al cruzar un milestone de combo alto
 const ICE_G_HACKEO = 40;    // usar el hackeo robado (muy visible = mucha atención)
 const ICE_G_TIEMPO = 0.0016;// goteo por milisegundo (~1.5/seg): la Migra siempre acecha
 let iceComboAviso = 0;      // último milestone de combo que ya sumó (para no repetir)
-const ICE_VEL = 2.15;      // velocidad de persecución de la camioneta
+const ICE_VEL = 2.5;       // velocidad de persecución de la camioneta (más agresiva)
 const ICE_ALCANCE = 46;    // distancia a la que te agarra
-const ICE_ESCAPE_DIST = 820;    // distancia a la que LOS PERDÉS (escape por distancia, no por timer)
+const ICE_ESCAPE_DIST = 650;    // distancia a la que LOS PERDÉS (compensada por la van más rápida)
 const ICE_ESCAPE_HOLD = 800;    // ms sosteniendo esa distancia para confirmar el escape
 const ICE_BURST_MS = 2500;      // arrancón inicial de la van: se te viene encima (drama)
 const ICE_BURST_MUL = 2.2;      // multiplicador de velocidad durante el arrancón
@@ -1138,6 +1152,103 @@ const ARMAS = {
   bolaCurva:{ nom:'BOLA CON EFECTO', ammo:99, dmg:12, kd:false, vel:11, arc:2.0, cd:1200, col:'#c9f25e', curva:true,     desc:'dobla sola' }
 };
 const ARMA_KEYS = ['botella','ladrillo','gomera','cuchillo','pizza'];
+
+/* COMPARACIÓN DE ARMAS: al pisar un arma teniendo otra en la mano, el mundo se frena
+   y elegís con cuál quedarte. { nueva:wtype, item:ref al objeto del piso, sel:0|1 } */
+let armaCompara = null;
+let armaComparaAnim = 0;   // 0..1, animación de entrada del panel
+let armaComparaBoxes = [];
+
+// resolver la comparación: quedarse con la actual (0) o agarrar la nueva (1)
+function resolverCompara(elige){
+  if(!armaCompara) return;
+  const it = armaCompara.item, p = player;
+  if(elige === 1){
+    // agarrás la nueva: la tuya cae al piso, ahí queda por si te arrepentís
+    const vieja = p.arma, viejaAmmo = p.ammo;
+    const A = ARMAS[armaCompara.nueva];
+    p.arma = armaCompara.nueva; p.ammo = A.ammo;
+    const idx = items.indexOf(it);
+    if(idx >= 0) items.splice(idx, 1);
+    if(vieja && viejaAmmo > 0){
+      // la vieja queda en el suelo, marcada para que no te vuelva a preguntar al instante
+      items.push({ x:p.x + p.face*-28, y:p.y, t:0, kind:'weapon', wtype:vieja, rechazada:true });
+    }
+    popups.push({ x:p.x, y:p.y-112, txt:A.nom + ' x' + A.ammo, t:0, col:'#c98aff', size:18, vx:0, vy:-0.07 });
+    flashScreen = 60; SFX.arma(); vibrar(40);
+  } else {
+    // te quedás con la tuya: la del piso queda ahí y no vuelve a preguntar hasta que te alejes
+    it.rechazada = true;
+    popups.push({ x:p.x, y:p.y-104, txt:'te quedás con la tuya', t:0, col:'#8f93b8', size:13, vx:0, vy:-0.07 });
+    SFX.punch();
+  }
+  armaCompara = null; armaComparaAnim = 0;
+}
+
+// panel de comparación: tu arma vs la del piso, lado a lado
+function drawArmaCompara(){
+  if(!armaCompara) return;
+  const an = armaComparaAnim;
+  armaComparaBoxes = [];
+  g.save();
+  g.globalAlpha = 0.82 * an;
+  g.fillStyle = '#05040e'; g.fillRect(0, 0, W, H);
+  g.globalAlpha = 1;
+
+  const pw = 640, ph = 260, px0 = W/2 - pw/2, py0 = H/2 - ph/2 - 10;
+  g.save();
+  g.translate(W/2, py0 + ph/2); g.scale(0.9 + 0.1*an, 0.9 + 0.1*an); g.translate(-W/2, -(py0 + ph/2));
+
+  textC('¿CON CUÁL TE QUEDÁS?', W/2, py0 - 22, 24, '#ffd24a');
+  textC(isTouch ? 'tocá la que quieras' : '← → elegir · ENTER confirmar · ESC quedarte con la tuya', W/2, py0 - 2, 11, '#8f93b8');
+
+  const tuya = { key:player.arma, ammo:player.ammo };
+  const nueva = { key:armaCompara.nueva, ammo:ARMAS[armaCompara.nueva].ammo };
+  const tarjetas = [
+    { t:'LA TUYA',    d:tuya,  x:px0 + 20 },
+    { t:'EN EL PISO', d:nueva, x:px0 + pw/2 + 20 }
+  ];
+  const cw = pw/2 - 40;
+
+  for(let k = 0; k < 2; k++){
+    const c = tarjetas[k], A = ARMAS[c.d.key], on = armaCompara.sel === k;
+    const cx = c.x, cy = py0 + 12;
+    g.fillStyle = on ? 'rgba(193,39,45,0.5)' : 'rgba(20,18,36,0.92)';
+    g.fillRect(cx, cy, cw, ph - 24);
+    g.strokeStyle = on ? '#ffd24a' : '#4a4468'; g.lineWidth = on ? 3 : 2;
+    g.strokeRect(cx, cy, cw, ph - 24);
+    // etiqueta
+    g.fillStyle = on ? '#ffd24a' : '#3a3555'; g.fillRect(cx, cy, cw, 22);
+    textC(c.t, cx + cw/2, cy + 16, 12, on ? '#1a1420' : '#8f93b8');
+    // nombre del arma
+    textC(A.nom, cx + cw/2, cy + 46, 20, A.col);
+    // stats comparadas (▲ mejor · ▼ peor)
+    const otra = ARMAS[tarjetas[1-k].d.key];
+    const cmp = (mio, suyo, masEsMejor) => {
+      if(mio === suyo) return { s:'=', c:'#8f93b8' };
+      const mejor = masEsMejor ? mio > suyo : mio < suyo;
+      return { s: mejor ? '▲' : '▼', c: mejor ? '#5cc96c' : '#ff5a5a' };
+    };
+    const filas = [
+      ['DAÑO',    A.dmg,       cmp(A.dmg, otra.dmg, true)],
+      ['MUNICIÓN', c.d.ammo === 99 ? '∞' : c.d.ammo, cmp(c.d.ammo, tarjetas[1-k].d.ammo, true)],
+      ['CADENCIA', A.cd + 'ms', cmp(A.cd, otra.cd, false)],
+      ['DERRIBA',  A.kd ? 'SÍ' : 'no', cmp(A.kd?1:0, otra.kd?1:0, true)]
+    ];
+    let fy = cy + 74;
+    for(const [nom, val, ind] of filas){
+      g.fillStyle = 'rgba(10,8,20,0.6)'; g.fillRect(cx + 12, fy, cw - 24, 22);
+      textC(nom, cx + 22, fy + 15, 11, '#8f93b8', 'left');
+      textC(String(val), cx + cw - 44, fy + 15, 13, '#fff', 'right');
+      textC(ind.s, cx + cw - 22, fy + 15, 12, ind.c, 'right');
+      fy += 26;
+    }
+    textC(A.desc, cx + cw/2, fy + 14, 11, '#a8adcf');
+    armaComparaBoxes.push({ i:k, x:cx, y:cy, w:cw, h:ph - 24 });
+  }
+  g.restore();
+  g.restore();
+}
 
 function lanzar(o, tipo, dir){
   const A = ARMAS[tipo];
@@ -1691,6 +1802,7 @@ function reset(){
   if(gameMode === 'story') charSel = 0;   // la historia se juega con Florentino
   cam.x = 0; shake = 0; score = 0; winT = 0;
   enemies = []; items = []; sparks = []; popups = []; confetti = [];
+  armaCompara = null; armaComparaAnim = 0;   // que no sobreviva un panel de la corrida anterior
   activeZone = null;
   hitstop = 0; slowmo = 0; impacts = []; combo = 0; comboT = 0; comboBest = 0;
   flashScreen = 0; runCoins = 0; wave = 0; bossAnnounce = 0; vsIntro = null; dialogo = null; ondas = []; initTachos(); bossRushActivo = false; bossRushProxT = 0; desafioDiario = false; fantasmaGrab = null; fantasmaRec = null; fantasmaIdx = 0; fantasmaAvisoFin = false; bossEsc.actual = null; bossEsc.prox = null; bossEsc.glitchT = 0; climaAvisoT = 4200; nemSpawneadoEnRun = false; nemAvisoT = 0; hackeoCarga = 0; hackeoActivo = 0; hackeoFlash = 0; iceHeat = 0; iceState = 'off'; iceT = 0; iceAvisoT = 0; deportado = false; iceAgentes = []; iceComboAviso = 0;
@@ -3343,6 +3455,15 @@ function nemPuedeSpawnear(){
 /* ---------------- INPUT ---------------- */
 addEventListener('keydown', e => {
   audioInit();
+  // COMPARACIÓN DE ARMAS: se lleva todas las teclas hasta que decidas
+  if(armaCompara && !e.repeat){
+    e.preventDefault();
+    if(e.code === 'ArrowLeft' || e.code === 'KeyA'){ armaCompara.sel = 0; SFX.pickup ? SFX.pickup() : SFX.go(); }
+    else if(e.code === 'ArrowRight' || e.code === 'KeyD'){ armaCompara.sel = 1; SFX.pickup ? SFX.pickup() : SFX.go(); }
+    else if(e.code === 'Enter' || e.code === 'Space') resolverCompara(armaCompara.sel);
+    else if(e.code === 'Escape') resolverCompara(0);
+    return;
+  }
   // durante el diálogo, cualquier tecla avanza (y no hace nada más)
   if(dialogo && !e.repeat){ dialogoAvanzar = true; e.preventDefault(); return; }
   if(e.code === 'KeyP' && mode !== 'play'){ mode = 'pruebaSel'; menuSel = 0; SFX.go(); return; }
@@ -3457,6 +3578,17 @@ function btnPress(id){
 cv.addEventListener('pointerdown', e => {
   audioInit();
   const p = toCanvas(e);
+  // COMPARACIÓN DE ARMAS: tocá la tarjeta que quieras (se lleva el toque)
+  if(armaCompara){
+    for(const b of armaComparaBoxes){
+      if(p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h){
+        if(armaCompara.sel !== b.i){ armaCompara.sel = b.i; SFX.pickup ? SFX.pickup() : SFX.go(); }
+        else resolverCompara(b.i);   // segundo toque en la misma = confirmar
+        return;
+      }
+    }
+    return;
+  }
   if(dialogo){ dialogoAvanzar = true; return; }   // cualquier toque avanza el diálogo
   if(ruleta){
     if(ruleta.fase === 'lista'){ slotWantStart = true; return; }
@@ -4445,6 +4577,8 @@ function updatePlayer(dt){
 
   for(let i = items.length - 1; i >= 0; i--){
     const it = items[i];
+    // si descartaste un arma y te alejaste, se "olvida" y puede volver a ofrecerse
+    if(it.rechazada && Math.abs(it.x - p.x) > 64) it.rechazada = false;
     // las monedas vuelan hacia vos
     if(it.kind === 'coin'){
       // física de fuente: saltan al aparecer
@@ -4484,6 +4618,13 @@ function updatePlayer(dt){
         items.splice(i, 1); continue;
       } else if(it.kind === 'weapon'){
         const A = ARMAS[it.wtype];
+        // ¿ya tenés un arma en la mano? → NO se cambia sola: abrimos la COMPARACIÓN y elegís vos
+        if(p.arma && p.ammo > 0 && !it.rechazada){
+          armaCompara = { nueva:it.wtype, item:it, sel:1 };   // sel: 0 = quedarte con la tuya, 1 = agarrar la nueva
+          SFX.pickup();
+          continue;   // el objeto sigue en el piso hasta que decidas
+        }
+        if(it.rechazada) continue;   // la descartaste: no vuelve a preguntar hasta que te alejes
         p.arma = it.wtype; p.ammo = A.ammo;
         popups.push({ x:p.x, y:p.y-112, txt:A.nom + ' x' + A.ammo, t:0, col:'#c98aff', size:18, vx:0, vy:-0.07 });
         flashScreen = 60; SFX.arma(); vibrar(40);
@@ -4812,6 +4953,17 @@ function update(dt){
     T += dt; updateVS(dt);
     if(shake > 0) shake -= dt; if(flashScreen > 0) flashScreen -= dt;
     return;
+  }
+  // comparación de armas: el mundo se frena mientras decidís con cuál quedarte
+  if(armaCompara){
+    // por las dudas: si el jugador o el objeto del piso ya no existen, cerramos el panel
+    if(!player || !player.arma || items.indexOf(armaCompara.item) < 0){
+      armaCompara = null; armaComparaAnim = 0;
+    } else {
+      T += dt; armaComparaAnim = Math.min(1, (armaComparaAnim || 0) + dt/160);
+      if(shake > 0) shake -= dt; if(flashScreen > 0) flashScreen -= dt;
+      return;
+    }
   }
   // diálogo: el mundo se congela mientras charlan
   if(dialogo){
@@ -7739,6 +7891,7 @@ function render(){
   if(!bossEsc.actual){ drawClima(); drawLluvia(); }   // clima del día + lluvia por encima del mundo
   drawVS();   // presentación épica de jefe (encima de todo)
   drawDialogo();   // conversación en medio de la pelea
+  drawArmaCompara();   // ¿con cuál arma te quedás? (el mundo está frenado)
   if(mode === 'over') drawOver();
   if(mode === 'win') drawWin();
   if(paused && mode === 'play'){
