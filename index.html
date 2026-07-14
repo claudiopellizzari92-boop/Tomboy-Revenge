@@ -1221,9 +1221,13 @@ function iceAlarma(){
   if(iceState !== 'off') return;
   iceState = 'alarma';
   iceT = 0;
-  // entra desde el borde más lejano al jugador
+  // ¿PARA QUÉ LADO TENÉS CANCHA? la van entra por el lado donde MENOS lugar te queda,
+  // así siempre te deja el mundo abierto para escapar (nunca te acorrala contra una pared)
   const px = player ? player.x : cam.x + W/2;
-  const desdeDerecha = (px - cam.x) < W/2;
+  const lugarIzq = px - 26;              // cuánto podés correr hacia la izquierda
+  const lugarDer = (WORLD - 26) - px;    // cuánto podés correr hacia la derecha
+  // entra desde la derecha si hacia la izquierda tenés más cancha (así escapás para la izquierda)
+  const desdeDerecha = lugarIzq > lugarDer;
   iceLado = desdeDerecha ? -1 : 1;   // recordamos el lado de entrada para la retirada
   iceFace = desdeDerecha ? -1 : 1;   // dirección de movimiento (-1 = va hacia la izquierda); el flip se resuelve en drawICE
   iceX = desdeDerecha ? (cam.x + W + 120) : (cam.x - 120);
@@ -1448,6 +1452,14 @@ function drawICE(){
     const msj = holdP > 0 ? '😤 ¡SEGUÍ ASÍ, YA CASI!' : (prog < 0.3 ? '🚨 ¡TE ALCANZAN — CORRÉ!' : '💨 ¡PONÉ DISTANCIA!');
     const colM = holdP > 0 ? '#8fffb8' : (prog < 0.3 ? '#ff5a5a' : '#ffd24a');
     textC(msj, W/2, by2 - 12, 14, (prog < 0.3 && Math.floor(iceSirena/120)%2) ? '#fff' : colM);
+    // ¿te comiste la pared del mundo? avisale que corra para el otro lado
+    const enPared = player.x <= 40 || player.x >= WORLD - 40;
+    if(enPared){
+      const haciaDonde = player.x <= 40 ? '➡ ¡DATE VUELTA, CORRÉ PARA ALLÁ!' : '⬅ ¡DATE VUELTA, CORRÉ PARA ALLÁ!';
+      g.fillStyle = 'rgba(6,4,10,0.9)'; g.fillRect(W/2 - 190, by2 + 40, 380, 26);
+      g.strokeStyle = '#ff2a3a'; g.lineWidth = 2; g.strokeRect(W/2 - 190, by2 + 40, 380, 26);
+      textC(haciaDonde, W/2, by2 + 57, 14, Math.floor(iceSirena/110)%2 ? '#fff' : '#ff8a8a');
+    }
     g.restore();
   }
 }
@@ -2881,6 +2893,184 @@ function drawCosPreview(c, x, y){
 
 
 
+// ============ CÓMO SE JUEGA (manual del barrio) ============
+let ayudaPag = 0;
+const AYUDA_PAGS = ['CONTROLES', 'PELEA', 'RECURSOS', 'LA MIGRA', 'PROGRESO'];
+// devuelve la tecla real configurada para una acción (respeta el remapeo del jugador)
+function teclaAyuda(acc){
+  const arr = KEYMAP[acc] || [];
+  return arr.map(k => nombreTecla(k)).join(' / ') || '—';
+}
+function drawAyuda(){
+  drawBG((T*0.012) % (WORLD - W));
+  g.fillStyle = 'rgba(5,4,14,0.93)'; g.fillRect(0, 0, W, H);
+  menuBoxes = [];
+
+  textC('📖 CÓMO SE JUEGA', W/2, 42, 28, '#ffd24a');
+  textC('el manual del barrio · todo lo que tenés que saber', W/2, 63, 11, '#8f93b8');
+
+  // --- pestañas de página ---
+  const tabW = 150, gapT = 6;
+  const totalT = AYUDA_PAGS.length * tabW + (AYUDA_PAGS.length-1)*gapT;
+  let tx = W/2 - totalT/2;
+  for(let i = 0; i < AYUDA_PAGS.length; i++){
+    const on = ayudaPag === i;
+    g.fillStyle = on ? 'rgba(255,210,74,0.25)' : 'rgba(20,18,36,0.8)';
+    g.fillRect(tx, 78, tabW, 26);
+    g.strokeStyle = on ? '#ffd24a' : '#4a4468'; g.lineWidth = 2; g.strokeRect(tx, 78, tabW, 26);
+    textC(AYUDA_PAGS[i], tx + tabW/2, 95, 11, on ? '#fff' : '#8f93b8');
+    menuBoxes.push({ i:'apag_'+i, x:tx, y:78, w:tabW, h:26 });
+    tx += tabW + gapT;
+  }
+
+  // helper: fila de "tecla → qué hace"
+  const filaT = (y, tecla, nom, desc, col) => {
+    g.fillStyle = 'rgba(20,18,36,0.75)'; g.fillRect(60, y, W - 120, 30);
+    g.strokeStyle = '#3a3555'; g.lineWidth = 1; g.strokeRect(60, y, W - 120, 30);
+    // chip de la tecla
+    g.fillStyle = 'rgba(255,210,74,0.18)'; g.fillRect(68, y + 5, 96, 20);
+    g.strokeStyle = col || '#ffd24a'; g.lineWidth = 1.5; g.strokeRect(68, y + 5, 96, 20);
+    textC(tecla, 116, y + 19, 11, col || '#ffd24a');
+    textC(nom, 180, y + 19, 13, '#fff', 'left');
+    textC(desc, 320, y + 19, 11, '#a8adcf', 'left');
+  };
+  // helper: párrafo de mecánica
+  const bloque = (y, ico, titulo, lineas, col) => {
+    const h = 26 + lineas.length*15;
+    g.fillStyle = 'rgba(20,18,36,0.75)'; g.fillRect(60, y, W - 120, h);
+    g.strokeStyle = col; g.lineWidth = 1.5; g.strokeRect(60, y, W - 120, h);
+    g.fillStyle = col; g.fillRect(60, y, 4, h);
+    textC(ico + ' ' + titulo, 76, y + 17, 14, col, 'left');
+    for(let i = 0; i < lineas.length; i++)
+      textC(lineas[i], 76, y + 34 + i*15, 11, '#a8adcf', 'left');
+    return y + h + 10;
+  };
+
+  if(ayudaPag === 0){
+    // ===== CONTROLES =====
+    textC('teclas actuales (podés cambiarlas en ⚙ CONTROLES del menú)', W/2, 124, 11, '#7ad66a');
+    let y = 138;
+    filaT(y, '← → ↑ ↓  /  WASD', 'MOVERSE', 'caminás en 8 direcciones por el barrio'); y += 34;
+    filaT(y, teclaAyuda('punch'), 'PUÑO', 'golpe rápido · MANTENÉ 1s = GOLPE CARGADO'); y += 34;
+    filaT(y, teclaAyuda('kick'), 'PATADA', 'más lenta pero pega más fuerte'); y += 34;
+    filaT(y, teclaAyuda('jump'), 'SALTO', 'en el aire + puño/patada = patada voladora'); y += 34;
+    filaT(y, teclaAyuda('special'), 'ESPECIAL', 'con la barra azul llena · limpia la pantalla', '#4aa8ff'); y += 34;
+    filaT(y, teclaAyuda('throw'), 'TIRAR', 'agarrás y lanzás botellas, tachos y enemigos'); y += 34;
+    filaT(y, teclaAyuda('eat'), 'QUESILLO', 'comés lo guardado y recuperás vida', '#ffd24a'); y += 34;
+    filaT(y, teclaAyuda('dash'), 'ESQUIVE', 'te desplazás rápido · esquiva golpes'); y += 34;
+    filaT(y, teclaAyuda('block'), 'BLOQUEO', 'MANTENELO apretado · reduce el daño', '#7ad66a');
+    textC('📱 en celular tenés los botones en pantalla (se pueden reubicar)', W/2, H - 62, 11, '#8f93b8');
+
+  } else if(ayudaPag === 1){
+    // ===== PELEA =====
+    let y = 122;
+    y = bloque(y, '👊', 'COMBO', [
+      'Encadená golpes sin que se te corte la cadena: cada golpe suma al combo.',
+      'Si pasa medio segundo sin pegar, o te pegan a vos, el combo se corta.',
+      'Combos altos = más monedas, más puntos y milestones dorados cada 10.'
+    ], '#ffd24a');
+    y = bloque(y, '💥', 'GOLPE CARGADO', [
+      'Mantené el PUÑO apretado 1 segundo (destella) y soltalo.',
+      'Golpea a TODOS los enemigos en línea recta adelante tuyo.'
+    ], '#ff8a3c');
+    y = bloque(y, '⭐', 'ESPECIAL', [
+      'La barra azul se carga pegando y recibiendo. Al llegar a 100 parpadea.',
+      'Cada personaje tiene el suyo: Florentino demoledor, Chiki palazo giratorio.'
+    ], '#4aa8ff');
+    y = bloque(y, '😵', 'REMATE', [
+      'Si un enemigo queda MAREADO (ve estrellitas), pegale con el PUÑO al lado',
+      'y hacés un remate cinematográfico. Carga el especial de regalo.'
+    ], '#ff2fb0');
+    y = bloque(y, '🛡', 'DEFENSA', [
+      'BLOQUEO mantenido reduce el daño. El ESQUIVE te saca de los golpes.',
+      'Ojo: bloquear tiene un enfriamiento, no abuses.'
+    ], '#7ad66a');
+
+  } else if(ayudaPag === 2){
+    // ===== RECURSOS =====
+    let y = 122;
+    y = bloque(y, '🧀', 'QUESILLOS', [
+      'Los juntás del piso y los GUARDÁS (hasta 3). No se comen solos.',
+      'Apretá ' + teclaAyuda('eat') + ' cuando vos quieras para recuperar vida.',
+      'Comer te frena un toque: elegí bien el momento.'
+    ], '#ffd24a');
+    y = bloque(y, '🍾', 'ARMAS DEL BARRIO', [
+      'Botellas, tachos y hasta los propios enemigos se pueden agarrar y tirar.',
+      'Apretá ' + teclaAyuda('throw') + ' cerca de un objeto para levantarlo, de nuevo para lanzarlo.'
+    ], '#9fd6ff');
+    y = bloque(y, '🔥', 'MODO FIEBRE', [
+      'La barra de fiebre se llena a los golpes. Cuando estalla, entrás en FIEBRE:',
+      'un solo golpe liquida a cualquier enemigo común y el imán de monedas crece.'
+    ], '#ff5030');
+    y = bloque(y, '💻', 'EL HACKEO', [
+      'Si lo robaste en la historia, se carga matando. Al 100% podés usarlo.',
+      'Corrompe la pantalla y hace daño... pero es MUY visible: la Migra lo nota.'
+    ], '#00ff66');
+    y = bloque(y, '🎰', 'LA TRAGAMONEDAS', [
+      'Cuando la máquina del barrio se pone "lista", acercate y apretá PUÑO',
+      'para tirar de la palanca. Premios en monedas.'
+    ], '#ff9ad6');
+
+  } else if(ayudaPag === 3){
+    // ===== LA MIGRA (ICE) =====
+    let y = 122;
+    y = bloque(y, '👁', 'LA ATENCIÓN', [
+      'Todo lo que hacés llama la atención de la Migra. La barra sube por:',
+      '· cada enemigo que liquidás · combos altos · usar el hackeo',
+      '· y sube sola con el tiempo: la Migra SIEMPRE acecha.',
+      'Cuando avisa "LA MIGRA TE VIGILA" ya estás en la mira.'
+    ], '#ff8a3c');
+    y = bloque(y, '🚨', 'LA REDADA', [
+      'Al llenarse la barra cae la camioneta con sirena y se bajan los agentes.',
+      'El juego entra en cámara lenta y te avisa para qué lado correr.',
+      'Los primeros segundos la van ACELERA y se te viene encima. No te asustes.'
+    ], '#ff2a3a');
+    y = bloque(y, '🏃', 'CÓMO ESCAPAR', [
+      'CORRÉ. Mirá la barra de arriba: 🚐 a la izquierda, 🏃 a la derecha.',
+      'Poné distancia hasta llegar a la zona verde y SOSTENELA un momento.',
+      'Cuando los perdés ganás +750 puntos. Si te alcanzan, te deportan: game over.'
+    ], '#2fdd6f');
+    y = bloque(y, '💡', 'CONSEJO', [
+      'Durante la redada el mapa se abre: podés correr libre para los dos lados.',
+      'No pelees, no juntes monedas: corré y nada más.'
+    ], '#ffd24a');
+
+  } else {
+    // ===== PROGRESO =====
+    let y = 122;
+    y = bloque(y, '🕹', 'LOS MODOS', [
+      'MODO HISTORIA: con Florentino, 4 zonas del barrio y los jefes finales.',
+      'MODO HORDA: se desbloquea al terminar la historia. Elegís luchador y',
+      'aguantás oleadas infinitas. DESAFÍO DIARIO: una corrida distinta por día.'
+    ], '#ffd24a');
+    y = bloque(y, '¢', 'LAS MONEDAS', [
+      'Caen de los enemigos. Combos altos hacen caer más.',
+      'Se guardan entre partidas: lo que juntás no se pierde al morir.'
+    ], '#ffd24a');
+    y = bloque(y, '🛒', 'TIENDA DE MEJORAS', [
+      'Mejoras PERMANENTES: aguante, carga del especial, duración del combo y más.',
+      'Adentro de la tienda está también el 👕 VESTUARIO (gorras, coronas, auras)',
+      'y la 🎰 QUINIELA DEL BARRIO: apostás a un número, se resuelve al día siguiente.'
+    ], '#ff5ec8');
+    y = bloque(y, '🏛', 'MONUMENTO DEL BARRIO', [
+      'Donás monedas y subís de RANGO (de Rookie Casual a Tomboy Prime).',
+      'No da poder: da FLEX. Tu rango sale en la tarjeta de victoria.'
+    ], '#ffd24a');
+    y = bloque(y, '👻', 'FANTASMAS Y RÉCORDS', [
+      'En el boss rush corrés contra el fantasma del más rápido del día.',
+      'Al ganar podés bajarte una TARJETA DE VICTORIA para mandar al grupo.'
+    ], '#9fd6ff');
+  }
+
+  // --- navegación ---
+  g.fillStyle = 'rgba(60,40,40,0.7)'; g.fillRect(W/2 - 60, H - 40, 120, 28);
+  g.strokeStyle = '#a06868'; g.lineWidth = 2; g.strokeRect(W/2 - 60, H - 40, 120, 28);
+  textC('VOLVER', W/2, H - 22, 13, '#ffb0b0');
+  menuBoxes.push({ i:'avolver', x:W/2 - 60, y:H - 40, w:120, h:28 });
+  if(!isTouch) textC('← → cambiar de página · ESC volver', W/2, H - 50, 10, '#8f93b8');
+}
+// ============ FIN CÓMO SE JUEGA ============
+
 // ============ SPRITE DE LA ESTATUA DEL MONUMENTO ============
 const ESTATUA_IMG = { img: null, listo: false };
 (function(){
@@ -2941,11 +3131,6 @@ function drawMonumento(){
 
   textC('🏛 MONUMENTO DEL BARRIO', W/2, 52, 30, '#ffd24a');
   textC('doná monedas · subí de rango · flexeá ante el grupo', W/2, 76, 12, '#8f93b8');
-  // botón para ir al vestuario
-  g.fillStyle = 'rgba(255,94,200,0.22)'; g.fillRect(W - 190, 30, 168, 32);
-  g.strokeStyle = '#ff5ec8'; g.lineWidth = 2; g.strokeRect(W - 190, 30, 168, 32);
-  textC('👕 VESTUARIO', W - 106, 50, 15, '#ffd6f0');
-  menuBoxes.push({ i:1050, x:W - 190, y:30, w:168, h:32 });
 
   // --- la estatua (pedestal + mono dorado "Chila" sprite) ---
   const ex = W/2, ey = 300;
@@ -3186,7 +3371,11 @@ addEventListener('keydown', e => {
     if(mode !== 'play'){
       if(e.code === 'ArrowUp' || e.code === 'KeyW') uiMove(-1);
       if(e.code === 'ArrowDown' || e.code === 'KeyS') uiMove(1);
-      if(mode === 'tabla' && (e.code === 'ArrowLeft' || e.code === 'ArrowRight' || e.code === 'KeyA' || e.code === 'KeyD')){
+      if(mode === 'ayuda' && (e.code === 'ArrowLeft' || e.code === 'ArrowRight' || e.code === 'KeyA' || e.code === 'KeyD')){
+        const dP = (e.code === 'ArrowRight' || e.code === 'KeyD') ? 1 : -1;
+        ayudaPag = (ayudaPag + dP + AYUDA_PAGS.length) % AYUDA_PAGS.length;
+        SFX.pickup ? SFX.pickup() : SFX.go();
+      } else if(mode === 'tabla' && (e.code === 'ArrowLeft' || e.code === 'ArrowRight' || e.code === 'KeyA' || e.code === 'KeyD')){
         tablaModo = tablaModo === 'story' ? 'horde' : 'story';
         if(SB_ON()) sbTraerTop(tablaModo); SFX.punch();
       } else {
@@ -3197,7 +3386,8 @@ addEventListener('keydown', e => {
         if(capturandoTecla){ capturandoTecla = null; }
         else if(mode === 'pruebaSel'){ mode = 'title'; menuSel = 0; }
         else if(mode === 'monumento'){ mode = 'title'; menuSel = 0; }
-        else if(mode === 'vestuario'){ mode = 'monumento'; }
+        else if(mode === 'ayuda'){ mode = 'title'; menuSel = 5; }
+        else if(mode === 'vestuario'){ mode = 'shop'; menuSel = 0; }
         else if(mode === 'controles'){ mode = 'title'; menuSel = 0; guardarControles(); }
         else if(mode === 'shop' && shopModal >= 0){ shopModal = -1; SFX.punch(); }
         else if(mode === 'shop' || mode === 'tabla' || mode === 'select'){ mode = 'title'; menuSel = 0; }
@@ -3353,6 +3543,7 @@ function uiConfirm(){
       return;
     }
     if(menuSel === 4){ mode = 'monumento'; menuSel = 0; monDonIdx = 0; SFX.go(); return; }
+    if(menuSel === 5){ mode = 'ayuda'; ayudaPag = 0; SFX.go(); return; }
     mode = 'tabla'; tablaModo = 'story'; if(SB_ON()) sbTraerTop('story'); SFX.go(); return;
   }
   if(mode === 'select'){ pedirAlias(); charSel = menuSel; reset(); mode = 'play'; paused = false; SFX.go(); return; }
@@ -3367,6 +3558,7 @@ function uiConfirm(){
       else { quinielaAviso = 'ya apostaste hoy · volvé mañana'; quinielaAvisoT = 1800; SFX.punch(); }
       return;
     }
+    if(menuSel === 1050){ mode = 'vestuario'; vestCat = 'hat'; SFX.go(); return; }   // VESTUARIO
     if(menuSel >= UPG_INFO.length){ mode = 'title'; menuSel = 0; SFX.go(); return; }  // VOLVER
     shopModal = menuSel; shopBtn = 0; shopAnim = 0; SFX.go();
     return;
@@ -6404,7 +6596,7 @@ function demoApe(state, big){
   return { x:W/2, y:436, z:0, vz:0, face:1, state:state, st:(T % 1000), walkT:T,
            flash:0, big:big, skin:'base', rigKey:'flo', club:false, crown:false, landed:true, koT:0 };
 }
-const MENU = ['MODO HISTORIA', 'MODO HORDA', 'DESAFÍO DIARIO', 'TIENDA DE MEJORAS', 'MONUMENTO DEL BARRIO', 'RÉCORDS'];
+const MENU = ['MODO HISTORIA', 'MODO HORDA', 'DESAFÍO DIARIO', 'TIENDA DE MEJORAS', 'MONUMENTO DEL BARRIO', 'CÓMO SE JUEGA', 'RÉCORDS'];
 let menuBoxes = [];
 let modalBoxes = [];
 let tarjetaAviso = '', tarjetaAvisoT = 0;
@@ -6435,7 +6627,7 @@ function menuTouch(p){
   if(mode === 'vestuario'){
     for(const b of menuBoxes){
       if(p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h){
-        if(b.i === 'vvolver'){ mode = 'monumento'; SFX.go(); return; }
+        if(b.i === 'vvolver'){ mode = 'shop'; menuSel = 0; SFX.go(); return; }
         if(typeof b.i === 'string' && b.i.startsWith('vtab_')){ vestCat = b.i.slice(5); SFX.go(); return; }
         if(typeof b.i === 'string' && b.i.startsWith('vit_')){
           const cid = b.i.slice(4);
@@ -6455,11 +6647,20 @@ function menuTouch(p){
     }
     return;
   }
+  if(mode === 'ayuda'){
+    for(const b of menuBoxes){
+      if(p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h){
+        if(b.i === 'avolver'){ mode = 'title'; menuSel = 5; SFX.go(); return; }
+        if(typeof b.i === 'string' && b.i.startsWith('apag_')){ ayudaPag = parseInt(b.i.slice(5)); SFX.pickup ? SFX.pickup() : SFX.go(); return; }
+        return;
+      }
+    }
+    return;
+  }
   if(mode === 'monumento'){
     for(const b of menuBoxes){
       if(p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h){
         if(b.i === 1099){ mode = 'title'; menuSel = 0; SFX.go(); return; }
-        if(b.i === 1050){ mode = 'vestuario'; vestCat = 'hat'; SFX.go(); return; }
         if(b.i >= 1000 && b.i < 1050){
           const monto = MON_DONACIONES[b.i - 1000];
           const rangoAntes = rangoDe(SAVE.donado || 0).nom;
@@ -6547,28 +6748,30 @@ function drawTitle(){
   if(!SPR.ready || !BG.ready || !QUES.ready || !ICONS.ready || !PIZZA.ready){ textC('CARGANDO...', W/2, H/2, 22, '#8f93b8'); return; }
 
   const bw = 360, bx = W/2 - bw/2;
+  const filaH = 40, filaStep = 46, filaY0 = 148;   // compactado: ahora son 7 opciones
   for(let i = 0; i < MENU.length; i++){
-    const y = 150 + i*52;
+    const y = filaY0 + i*filaStep;
     const bloqueado = (i === 1 && !SAVE.hordeUnlocked);
-    menuBoxes.push({ i:i, x:bx, y:y, w:bw, h:44 });
+    menuBoxes.push({ i:i, x:bx, y:y, w:bw, h:filaH });
     const on = menuSel === i;
     if(bloqueado){
       const parp = negado > 0 && Math.floor(T/90) % 2;
       g.fillStyle = parp ? 'rgba(150,30,30,0.9)' : 'rgba(14,12,26,0.85)';
-      g.fillRect(bx, y, bw, 44);
-      g.strokeStyle = on ? '#7a4048' : '#3a3555'; g.lineWidth = 2; g.strokeRect(bx, y, bw, 44);
-      textC('🔒 ' + MENU[i], bx + bw/2, y + 20, 17, '#6f6a86');
-      textC('terminá el MODO HISTORIA para desbloquearlo', bx + bw/2, y + 35, 10, on ? '#ff7a7a' : '#585472');
+      g.fillRect(bx, y, bw, filaH);
+      g.strokeStyle = on ? '#7a4048' : '#3a3555'; g.lineWidth = 2; g.strokeRect(bx, y, bw, filaH);
+      textC('🔒 ' + MENU[i], bx + bw/2, y + 18, 16, '#6f6a86');
+      textC('terminá el MODO HISTORIA para desbloquearlo', bx + bw/2, y + 32, 10, on ? '#ff7a7a' : '#585472');
     } else {
       g.fillStyle = on ? 'rgba(193,39,45,0.85)' : 'rgba(20,18,36,0.8)';
-      g.fillRect(bx, y, bw, 44);
-      g.strokeStyle = on ? '#ffd24a' : '#4a4468'; g.lineWidth = 2; g.strokeRect(bx, y, bw, 44);
+      g.fillRect(bx, y, bw, filaH);
+      g.strokeStyle = on ? '#ffd24a' : '#4a4468'; g.lineWidth = 2; g.strokeRect(bx, y, bw, filaH);
       const sub = i === 0 ? 'con FLORENTINO · 4 zonas y el jefe'
-                : i === 1 ? 'elegís luchador · oleadas infinitas' : '';
-      textC(MENU[i], bx + bw/2, y + (sub ? 22 : 28), 20, on ? '#fff' : '#ffd24a');
-      if(sub) textC(sub, bx + bw/2, y + 38, 10, on ? '#ffd7d7' : '#8f93b8');
+                : i === 1 ? 'elegís luchador · oleadas infinitas'
+                : i === 5 ? 'controles y mecánicas explicadas' : '';
+      textC(MENU[i], bx + bw/2, y + (sub ? 20 : 26), 19, on ? '#fff' : '#ffd24a');
+      if(sub) textC(sub, bx + bw/2, y + 34, 10, on ? '#ffd7d7' : '#8f93b8');
       if(i === 1 && SAVE.hordeUnlocked && Math.floor(T/500) % 2)
-        textC('✔', bx + bw - 22, y + 30, 18, '#5cc96c');
+        textC('✔', bx + bw - 22, y + 27, 18, '#5cc96c');
     }
   }
   if(negado > 0) negado -= 16;
@@ -6704,6 +6907,11 @@ function drawShop(){
   textC('TIENDA DE MEJORAS', W/2, 56, 32, '#ffd24a');
   textC('permanentes · se guardan entre partidas', W/2, 76, 12, '#8f93b8');
   textC('¢ ' + coins, W/2, 100, 24, '#ffd24a');
+  // botón para ir al VESTUARIO (los cosméticos viven acá, en la tienda)
+  g.fillStyle = 'rgba(255,94,200,0.22)'; g.fillRect(W - 190, 30, 168, 32);
+  g.strokeStyle = '#ff5ec8'; g.lineWidth = 2; g.strokeRect(W - 190, 30, 168, 32);
+  textC('👕 VESTUARIO', W - 106, 50, 15, '#ffd6f0');
+  menuBoxes.push({ i:1050, x:W - 190, y:30, w:168, h:32 });
   // BANNER DE LA QUINIELA DEL BARRIO
   const qy = 118, qbw = 600, qbx = W/2 - qbw/2;
   const yaAposte = quinielaHoy();
@@ -7234,6 +7442,7 @@ function render(){
   if(mode === 'tabla'){ T += 16; drawTabla(); drawCRT(); return; }
   if(mode === 'controles'){ T += 16; drawControles(); drawCRT(); return; }
   if(mode === 'pruebaSel'){ T += 16; drawPruebaSel(); drawCRT(); return; }
+  if(mode === 'ayuda'){ T += 16; drawAyuda(); drawCRT(); return; }
   if(mode === 'monumento'){ T += 16; drawMonumento(); drawCRT(); return; }
   if(mode === 'vestuario'){ T += 16; drawVestuario(); drawCRT(); return; }
 
