@@ -3,6 +3,17 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<!-- ===== iOS: Apple bloquea el Fullscreen API en iPhone (anda en Mac y iPad, no en iPhone).
+     El único camino a pantalla completa es "Agregar a inicio": con estos metas el juego
+     se abre en modo standalone, sin la barra de Safari. Requiere estar servido por URL. ===== -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="TOMBOY">
+<meta name="theme-color" content="#08070f">
+<!-- el ícono del menú de inicio (subí icono-180.png junto al HTML en Vercel) -->
+<link rel="apple-touch-icon" href="icono-180.png">
+<link rel="icon" href="icono-180.png">
 <title>TOMBOY REVENGE</title>
 <style>
   html,body{margin:0;padding:0;background:#08070f;height:100%;overflow:hidden;
@@ -24,6 +35,18 @@
   #girar p{font-size:13px;color:#8f93b8;margin:0;max-width:280px;line-height:1.5}
   @keyframes girito{0%,40%{transform:rotate(0)}70%,100%{transform:rotate(-90deg)}}
   @media (orientation:portrait){ body.tactil #girar{display:flex} }
+  /* CÓMO PONER EN PANTALLA COMPLETA EN iPHONE (Apple no permite el Fullscreen API acá) */
+  #ios{position:fixed;inset:0;z-index:90;background:rgba(4,3,10,0.92);display:none;
+    align-items:center;justify-content:center;font-family:'Courier New',monospace;padding:20px}
+  #ios .caja{background:#14121f;border:3px solid #ffd24a;border-radius:10px;
+    max-width:440px;padding:22px 24px;text-align:center}
+  #ios h2{color:#ffd24a;font-size:20px;margin:0 0 6px}
+  #ios .sub{color:#8f93b8;font-size:12px;margin:0 0 16px}
+  #ios ol{color:#cfd4ff;font-size:14px;text-align:left;margin:0 0 16px;padding-left:22px;line-height:1.9}
+  #ios b{color:#ffd24a}
+  #ios .cerrar{background:#c1272d;color:#fff;border:0;border-radius:8px;
+    padding:12px 26px;font-family:inherit;font-size:15px;font-weight:bold;cursor:pointer}
+  #ios .nota{color:#6f6a86;font-size:11px;margin:14px 0 0;line-height:1.5}
 </style>
 </head>
 <body>
@@ -33,6 +56,19 @@
   <div class="fono">📱</div>
   <h1>GIRÁ EL CELULAR</h1>
   <p>TOMBOY REVENGE se juega en horizontal.<br>Poné el teléfono de costado para entrar al barrio.</p>
+</div>
+<div id="ios">
+  <div class="caja">
+    <h2>⛶ PANTALLA COMPLETA</h2>
+    <p class="sub">Apple no deja hacerlo con un botón en el iPhone.<br>Pero hay truco:</p>
+    <ol>
+      <li>Tocá <b>Compartir</b> (el cuadradito con la flecha ↑)</li>
+      <li>Bajá y tocá <b>Agregar a inicio</b></li>
+      <li>Abrí <b>TOMBOY</b> desde el ícono nuevo</li>
+    </ol>
+    <button class="cerrar" id="iosOk">DALE, ENTENDÍ</button>
+    <p class="nota">Se abre sin la barra de Safari y queda como una app.<br>Acordate de girar el teléfono: se juega en horizontal.</p>
+  </div>
 </div>
 <script>
 'use strict';
@@ -159,24 +195,46 @@ addEventListener('resize', fit); fit();
 
 // ---- PANTALLA COMPLETA (móvil) ----
 const fsBtn = document.getElementById('fsBtn');
+const iosBox = document.getElementById('ios');
 const enFS = () => document.fullscreenElement || document.webkitFullscreenElement;
+// ¿el navegador soporta de verdad el Fullscreen API? (iPhone: NO — Apple lo bloquea).
+// Detectamos la capacidad en vez de olfatear el user-agent: si algún día Apple lo habilita,
+// el botón normal vuelve a funcionar solo, sin tocar una línea.
+function soportaFS(){
+  const el = document.documentElement;
+  return !!(el.requestFullscreen || el.webkitRequestFullscreen || el.mozRequestFullScreen || el.msRequestFullscreen);
+}
+// ¿ya lo abrieron desde el ícono de inicio? (ahí ya está en pantalla completa)
+function enStandalone(){
+  return window.navigator.standalone === true ||
+         (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+}
 function pedirFullscreen(){
   const el = document.documentElement;
   const fn = el.requestFullscreen || el.webkitRequestFullscreen || el.mozRequestFullScreen || el.msRequestFullscreen;
   if(fn){ try{ fn.call(el); }catch(e){} }
-  // bloquear orientación horizontal si se puede (mejor para un beat'em up)
+  // bloquear orientación horizontal si se puede (iOS la ignora, por eso el cartel de "girá")
   setTimeout(() => { try{ screen.orientation && screen.orientation.lock && screen.orientation.lock('landscape'); }catch(e){} }, 300);
 }
 function actualizarFsBtn(){
-  // mostrar el botón solo en móvil y si no estamos ya en fullscreen
   const esMovil = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
   // marcamos el body: el aviso de "girá el celular" es solo para táctiles (no para una
   // ventana angosta de escritorio, donde el CSS de orientación también daría vertical)
   document.body.classList.toggle('tactil', esMovil);
-  fsBtn.style.display = (esMovil && !enFS()) ? 'block' : 'none';
+  // ya está en standalone (abierto desde el ícono) → no hace falta ningún botón
+  if(!esMovil || enStandalone() || enFS()){ fsBtn.style.display = 'none'; }
+  else {
+    fsBtn.style.display = 'block';
+    // en iPhone el botón no puede hacer fullscreen: ofrece la instrucción de "Agregar a inicio"
+    fsBtn.textContent = soportaFS() ? '⛶ Pantalla completa' : '⛶ Cómo agrandar';
+  }
   setTimeout(fit, 100);
 }
-fsBtn.addEventListener('click', () => { pedirFullscreen(); setTimeout(actualizarFsBtn, 400); });
+fsBtn.addEventListener('click', () => {
+  if(soportaFS()){ pedirFullscreen(); setTimeout(actualizarFsBtn, 400); }
+  else { iosBox.style.display = 'flex'; }   // iPhone: explicamos el "Agregar a inicio"
+});
+document.getElementById('iosOk').addEventListener('click', () => { iosBox.style.display = 'none'; });
 document.addEventListener('fullscreenchange', actualizarFsBtn);
 document.addEventListener('webkitfullscreenchange', actualizarFsBtn);
 actualizarFsBtn();
