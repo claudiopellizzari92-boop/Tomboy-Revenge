@@ -4894,6 +4894,28 @@ function updateEnemy(e, dt){
     e.armorDecay = (e.armorDecay || 0) + dt;
     if(e.armorDecay > 900){ e.armorHits = 0; e.armorDecay = 0; }
   } else e.armorDecay = 0;
+  // ---- REDADA DE ICE: el barrio raja. Los Chikis no son giles: si cae la Migra, corren. ----
+  // NO se marcan como dead: la zona se completa con enemies.some(e => !e.dead), así que
+  // matarlos "de mentira" limpiaría la zona gratis y hasta daría el bonus PERFECTO.
+  // Se dispersan mientras dura la redada y vuelven a buscarte cuando la Migra se va.
+  if((iceState === 'persigue' || iceState === 'alarma') && !e.esJefe && !e.tirador &&
+     ['ko','down','hurt'].indexOf(e.state) < 0 && !e.dead){
+    if(e.atacando){ e.atacando = false; }   // suelta el ticket de ataque
+    e.lanzando = false;
+    const dir = e.x >= iceX ? 1 : -1;       // para el lado contrario a la camioneta
+    e.face = dir;
+    e.x += dir * e.speed * 1.9 * dt/16;
+    e.state = 'walk'; e.walkT += dt * 1.7;  // patitas rápidas: pánico
+    if(!e.panicoAviso){                     // un gritito la primera vez, arriba de su cabeza
+      e.panicoAviso = true;
+      popups.push({ x:e.x, y:e.y - 78, txt:'¡LA MIGRA!', t:0, col:'#ff8a8a', size:12, vx:0, vy:-0.06 });
+    }
+    // que no se escapen del cuadro (el clamp normal vive más abajo y no lo alcanzamos)
+    e.x = Math.max(cam.x - 40, Math.min(e.x, cam.x + W + 40));
+    e.x = Math.max(26, Math.min(e.x, WORLD - 26));
+    return;
+  }
+  if(iceState === 'off' && e.panicoAviso) e.panicoAviso = false;   // listo para la próxima redada
   // ---- MODO TIRADOR: Faw detrás del firewall, quieto, solo lanza bolas (va PRIMERO) ----
   if(e.tirador){
     e.walkT += dt * 0.3;
